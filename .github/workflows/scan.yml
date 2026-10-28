@@ -1,0 +1,25 @@
+name: Daily scan
+on:
+  schedule:
+    - cron: "30 11 * * 1-5"   # 5:00 PM IST, Mon-Fri, after market close
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: scanner/requirements.txt
+      - run: pip install -r scanner/requirements.txt
+      - run: python scanner/scan.py
+      - run: |
+          git config user.name "scanner-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/data.json
+          git commit -m "Update scan data" || echo "No changes"
+          git push
