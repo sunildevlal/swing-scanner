@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NSE Swing Scanner</title>
+<style>
+:root{--bg:#eef1ee;--card:#fbfcfb;--tx:#16241f;--mu:#667a72;--bd:#d6ddd8;--ac:#0b6b57;--g:#17803d;--w:#b45309;--sg:#0b6b57;--sgt:#fff}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1714;--card:#16211d;--tx:#e6efea;--mu:#8aa097;--bd:#26362f;--ac:#3fd1ab;--g:#4ade80;--w:#fbbf24;--sg:#3fd1ab;--sgt:#06231b}}
+*{box-sizing:border-box}
+html{padding-top:env(safe-area-inset-top,0)}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:0 0 env(safe-area-inset-bottom,0)}
+main{max-width:1100px;margin:0 auto;padding:16px 14px 40px}
+h1{font:600 22px/1.2 "Iowan Old Style","Palatino Linotype",Georgia,serif;margin:0}
+.mu{color:var(--mu)}
+header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px;margin-bottom:12px}
+#mkt{display:flex;flex-wrap:wrap;gap:8px 18px;padding:10px 12px;border:1px solid var(--bd);border-radius:8px;background:var(--card);margin-bottom:12px;font-size:14px}
+#mkt b{font-weight:600}.ok{color:var(--g)}.no{color:var(--w)}
+.tabs{display:inline-flex;border:1px solid var(--bd);border-radius:8px;overflow:hidden;margin-bottom:10px}
+.tabs button{border:0;background:var(--card);color:var(--tx);padding:8px 18px;font:inherit;cursor:pointer}
+.tabs button.on{background:var(--ac);color:var(--sgt)}
+.ctl{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.ctl select,.ctl input[type=search],.ctl button{font:inherit;padding:7px 9px;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--tx);min-height:36px}
+.ctl label{display:flex;align-items:center;gap:6px;font-size:14px}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.wrap{overflow-x:auto;border:1px solid var(--bd);border-radius:8px;background:var(--card)}
+table{border-collapse:collapse;width:100%;min-width:700px}
+th{text-align:left;font-weight:600;font-size:13px;color:var(--mu);padding:9px 10px;border-bottom:1px solid var(--bd)}
+td{padding:9px 10px;border-bottom:1px solid var(--bd);vertical-align:middle}
+tr.m{cursor:pointer}tr.m:hover{background:color-mix(in srgb,var(--ac) 7%,transparent)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.sc{display:inline-block;min-width:46px;text-align:center;padding:3px 8px;border-radius:6px;font:600 17px/1.2 "Iowan Old Style","Palatino Linotype",Georgia,serif;background:var(--bd);color:var(--tx)}
+.sc.s{background:var(--sg);color:var(--sgt)}.sc.g{background:color-mix(in srgb,var(--ac) 25%,var(--card));}
+.chip{display:inline-block;border:1px solid var(--bd);border-radius:20px;padding:1px 8px;margin:1px 3px 1px 0;font-size:12.5px;white-space:nowrap}
+td small{display:block;color:var(--mu)}
+tr.d td{background:color-mix(in srgb,var(--ac) 4%,var(--card));padding:14px}
+.dt{display:grid;grid-template-columns:3fr 2fr;gap:20px}
+@media(max-width:700px){.dt{grid-template-columns:1fr}}
+h4{margin:0 0 6px;font-size:14px}
+ul{margin:0;padding:0;list-style:none}li{padding:2px 0 2px 18px;position:relative}
+li::before{position:absolute;left:0;font-weight:700}li.g::before{content:"✓";color:var(--g)}li.w::before{content:"!";color:var(--w)}
+.bar{display:grid;grid-template-columns:105px 1fr 34px;gap:8px;align-items:center;font-size:13px;margin:3px 0}
+.bar i{height:7px;border-radius:4px;background:var(--bd);position:relative}
+.bar i::after{content:"";position:absolute;inset:0 auto 0 0;width:var(--w);border-radius:4px;background:var(--ac)}
+.bar b{text-align:right;font-weight:600}
+#count{margin:0 0 8px;font-size:14px}
+</style>
+</head>
+<body>
+<main>
+<header><h1>NSE Swing Scanner</h1><span class="mu" id="upd"></span></header>
+<div id="mkt"></div>
+<div class="tabs" id="tabs"><button data-t="D" class="on">Daily</button><button data-t="W">Weekly</button><button data-t="M">Monthly</button></div>
+<div class="ctl">
+  <select id="uni" aria-label="Universe"><option value="n500">Nifty 500</option><option value="n200">Nifty 200</option><option value="n100">Nifty 100 / Largecap</option><option value="mid">Midcap 150</option><option value="small">Smallcap 250</option></select>
+  <select id="pat" aria-label="Pattern"></select>
+  <select id="min" aria-label="Minimum score"><option value="0">Any score</option><option value="5">Score 5+</option><option value="6.5">Score 6.5+</option><option value="8">Score 8+</option></select>
+  <select id="rr" aria-label="Minimum reward to risk"><option value="0">Any R:R</option><option value="1.5">R:R 1.5+</option><option value="2">R:R 2+</option><option value="3">R:R 3+</option></select>
+  <input type="search" id="q" placeholder="Search stock" aria-label="Search stock">
+  <label><input type="checkbox" id="s2"> Stage 2 uptrend only</label>
+  <button id="csv">Download CSV</button>
+</div>
+<p id="count" class="mu">Loading…</p>
+<div class="wrap"><table>
+<thead><tr><th>#</th><th>Stock</th><th>Score</th><th>Patterns</th><th class="n">Entry</th><th class="n">Stop</th><th class="n">Target 1</th><th class="n">Target 2</th><th class="n">R:R</th></tr></thead>
+<tbody id="tb"></tbody></table></div>
+<p class="mu" style="font-size:13px;margin-top:14px">Scanner output is a list of candidates, not advice. Check the chart and news before you trade. Entry is the last close; weekly and monthly use the bar still in progress.</p>
+</main>
+<script>
+let D,tf="D";const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const f2=x=>x==null?"–":Number(x).toLocaleString("en-IN",{maximumFractionDigits:2});
+fetch("data.json?"+Date.now()).then(r=>r.json()).then(d=>{D=d;init();render()}).catch(()=>{$("count").textContent="No data yet. Run the “Daily scan” action in GitHub once (see README)."});
+function init(){
+  const m=D.market,y=v=>`<b class="${v?"ok":"no"}">${v?"Above":"Below"}</b>`;
+  $("upd").textContent=`Data as of ${D.last_bar} · updated ${D.updated}`;
+  $("mkt").innerHTML=`<span>Market: <b class="${m.mood=="Healthy"?"ok":"no"}">${m.mood}</b></span><span>Nifty ${f2(m.nifty)}: ${y(m.a50)} 50 DMA, ${y(m.a200)} 200 DMA</span><span>Stocks above 50 DMA: <b>${m.b50}%</b></span><span>Above 200 DMA: <b>${m.b200}%</b></span>`;
+  document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{tf=b.dataset.t;document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x==b));fillPats();render()});
+  ["uni","pat","min","rr","s2"].forEach(i=>$(i).onchange=render);$("q").oninput=render;$("csv").onclick=csv;
+  $("tb").onclick=e=>{const t=e.target.closest("tr.m");if(t)t.nextElementSibling.hidden=!t.nextElementSibling.hidden};
+  fillPats();
+}
+function fillPats(){const s=new Set();D.rows[tf].forEach(r=>r.pats.forEach(p=>s.add(p)));
+  $("pat").innerHTML='<option value="all">All patterns</option>'+[...s].sort().map(p=>`<option>${esc(p)}</option>`).join("")}
+function rows(){const u=$("uni").value,p=$("pat").value,ms=+$("min").value,rr=+$("rr").value,q=$("q").value.trim().toLowerCase(),s2=$("s2").checked;
+  return D.rows[tf].filter(r=>r.uni.includes(u)&&(p=="all"||r.pats.includes(p))&&r.score>=ms&&r.rr>=rr&&(!s2||r.pats.includes("Stage 2 uptrend"))&&(!q||r.sym.toLowerCase().includes(q)||r.name.toLowerCase().includes(q)))}
+function render(){
+  const R=rows();$("count").textContent=`${R.length} stocks, ranked from highest to lowest score. Tap a row to see why it was shortlisted.`;
+  $("tb").innerHTML=R.map((r,i)=>{
+    const cls=r.score>=8?"s":r.score>=6.5?"g":"";const ch=r.pats.filter(p=>p!="Stage 2 uptrend");
+    return `<tr class="m"><td class="mu">${i+1}</td><td><b>${esc(r.sym)}</b><small>${esc(r.name)}</small></td><td><span class="sc ${cls}">${r.score.toFixed(1)}</span><small>${r.label}</small></td>
+    <td>${ch.slice(0,2).map(p=>`<span class="chip">${esc(p)}</span>`).join("")}${ch.length>2?`<span class="chip">+${ch.length-2}</span>`:""}</td>
+    <td class="n">${f2(r.entry)}</td><td class="n">${f2(r.stop)}</td><td class="n">${f2(r.t1)}</td><td class="n">${f2(r.t2)}</td><td class="n">${r.rr.toFixed(1)}</td></tr>
+    <tr class="d" hidden><td colspan="9"><div class="dt"><div><h4>Why it was shortlisted</h4><ul>${r.why.map(w=>`<li class="${w[0]}">${esc(w[1])}</li>`).join("")}</ul></div>
+    <div><h4>Score breakdown (out of 10)</h4>${Object.entries(r.parts).map(([k,v])=>`<div class="bar"><span>${k}</span><i style="--w:${v*10}%"></i><b>${v.toFixed(1)}</b></div>`).join("")}
+    <p class="mu" style="margin:10px 0 0;font-size:13px">Target 1: ${esc(r.t1src)}${r.t2?`<br>Target 2: ${esc(r.t2src)}`:""}<br>${esc(r.sector)}</p></div></div></td></tr>`}).join("");
+}
+function csv(){const R=rows(),h=["Rank","Symbol","Name","Score","Patterns","Entry","Stop","Target1","Target2","RR"];
+  const l=[h].concat(R.map((r,i)=>[i+1,r.sym,r.name,r.score,r.pats.join("; "),r.entry,r.stop,r.t1,r.t2??"",r.rr]));
+  const b=new Blob([l.map(x=>x.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n")],{type:"text/csv"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=`scan-${tf}-${D.last_bar}.csv`;a.click()}
+</script>
+</body>
+</html>
