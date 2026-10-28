@@ -44,12 +44,19 @@ li::before{position:absolute;left:0;font-weight:700}li.g::before{content:"✓";c
 .bar i::after{content:"";position:absolute;inset:0 auto 0 0;width:var(--w);border-radius:4px;background:var(--ac)}
 .bar b{text-align:right;font-weight:600}
 #count{margin:0 0 8px;font-size:14px}
+.st{border:0;background:none;color:var(--mu);font-size:18px;cursor:pointer;padding:0 6px 0 0;vertical-align:middle}.st.on{color:#d97706}
+.ch{height:340px;margin-bottom:14px}.ok{color:var(--g)}
+.jb,.rm,#cw,#cj{font:inherit;font-size:14px;padding:6px 12px;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--tx);cursor:pointer}
+td input{font:inherit;padding:5px 8px;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--tx);width:100%;min-width:130px}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 <main>
 <header><h1>NSE Swing Scanner</h1><span class="mu" id="upd"></span></header>
 <div id="mkt"></div>
+<div class="tabs" id="views"><button data-v="s" class="on">Scanner</button><button data-v="w">Watchlist</button><button data-v="j">Journal</button></div>
+<section id="scan">
 <div class="tabs" id="tabs"><button data-t="D" class="on">Daily</button><button data-t="W">Weekly</button><button data-t="M">Monthly</button></div>
 <div class="ctl">
   <select id="uni" aria-label="Universe"><option value="n500">Nifty 500</option><option value="n200">Nifty 200</option><option value="n100">Nifty 100 / Largecap</option><option value="mid">Midcap 150</option><option value="small">Smallcap 250</option></select>
@@ -64,20 +71,32 @@ li::before{position:absolute;left:0;font-weight:700}li.g::before{content:"✓";c
 <div class="wrap"><table>
 <thead><tr><th>#</th><th>Stock</th><th>Score</th><th>Patterns</th><th class="n">Entry</th><th class="n">Stop</th><th class="n">Target 1</th><th class="n">Target 2</th><th class="n">R:R</th></tr></thead>
 <tbody id="tb"></tbody></table></div>
+</section>
+<section id="wl" hidden></section><section id="jr" hidden></section>
 <p class="mu" style="font-size:13px;margin-top:14px">Scanner output is a list of candidates, not advice. Check the chart and news before you trade. Entry is the last close; weekly and monthly use the bar still in progress.</p>
 </main>
 <script>
-let D,tf="D";const $=id=>document.getElementById(id);
+let D,tf="D",view="s",cur=[],CH={};const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const f2=x=>x==null?"–":Number(x).toLocaleString("en-IN",{maximumFractionDigits:2});
+const ld=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}},sv=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+const cp=(t,b)=>navigator.clipboard.writeText(t).then(()=>b.textContent="Copied");
+let WL=ld("wl",{}),JR=ld("jr",[]);
 fetch("data.json?"+Date.now()).then(r=>r.json()).then(d=>{D=d;init();render()}).catch(()=>{$("count").textContent="No data yet. Run the “Daily scan” action in GitHub once (see README)."});
 function init(){
   const m=D.market,y=v=>`<b class="${v?"ok":"no"}">${v?"Above":"Below"}</b>`;
   $("upd").textContent=`Data as of ${D.last_bar} · updated ${D.updated}`;
   $("mkt").innerHTML=`<span>Market: <b class="${m.mood=="Healthy"?"ok":"no"}">${m.mood}</b></span><span>Nifty ${f2(m.nifty)}: ${y(m.a50)} 50 DMA, ${y(m.a200)} 200 DMA</span><span>Stocks above 50 DMA: <b>${m.b50}%</b></span><span>Above 200 DMA: <b>${m.b200}%</b></span>`;
   document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{tf=b.dataset.t;document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x==b));fillPats();render()});
+  document.querySelectorAll("#views button").forEach(b=>b.onclick=()=>{view=b.dataset.v;document.querySelectorAll("#views button").forEach(x=>x.classList.toggle("on",x==b));$("scan").hidden=view!="s";$("wl").hidden=view!="w";$("jr").hidden=view!="j";render()});
   ["uni","pat","min","rr","s2"].forEach(i=>$(i).onchange=render);$("q").oninput=render;$("csv").onclick=csv;
-  $("tb").onclick=e=>{const t=e.target.closest("tr.m");if(t)t.nextElementSibling.hidden=!t.nextElementSibling.hidden};
+  $("tb").onclick=e=>{
+    const st=e.target.closest(".st");if(st){const s=st.dataset.s;if(s in WL)delete WL[s];else WL[s]="";sv("wl",WL);st.classList.toggle("on");return}
+    const jb=e.target.closest(".jb");if(jb){const r=cur[+jb.dataset.i],p=prompt("Buy price for "+r.sym,r.entry);if(p&&+p>0){JR.push({sym:r.sym,buy:+p,stop:r.stop,t1:r.t1,t2:r.t2});sv("jr",JR);jb.textContent="Added to journal"}return}
+    const t=e.target.closest("tr.m");if(t){const d=t.nextElementSibling;d.hidden=!d.hidden;if(!d.hidden)chart(d,cur[+t.dataset.i])}};
+  $("wl").onclick=e=>{const x=e.target.closest(".rm");if(x){delete WL[x.dataset.x];sv("wl",WL);wlv()}if(e.target.id=="cw")cp(Object.keys(WL).join("\n"),e.target)};
+  $("wl").oninput=e=>{if(e.target.dataset.n){WL[e.target.dataset.n]=e.target.value;sv("wl",WL)}};
+  $("jr").onclick=e=>{const x=e.target.closest(".rm");if(x){JR.splice(+x.dataset.x,1);sv("jr",JR);jrv()}if(e.target.id=="cj")cp(JR.map(j=>[j.sym,j.buy,j.stop,j.t1,j.t2||""].join(",")).join("\n"),e.target)};
   fillPats();
 }
 function fillPats(){const s=new Set();D.rows[tf].forEach(r=>r.pats.forEach(p=>s.add(p)));
@@ -85,16 +104,33 @@ function fillPats(){const s=new Set();D.rows[tf].forEach(r=>r.pats.forEach(p=>s.
 function rows(){const u=$("uni").value,p=$("pat").value,ms=+$("min").value,rr=+$("rr").value,q=$("q").value.trim().toLowerCase(),s2=$("s2").checked;
   return D.rows[tf].filter(r=>r.uni.includes(u)&&(p=="all"||r.pats.includes(p))&&r.score>=ms&&r.rr>=rr&&(!s2||r.pats.includes("Stage 2 uptrend"))&&(!q||r.sym.toLowerCase().includes(q)||r.name.toLowerCase().includes(q)))}
 function render(){
-  const R=rows();$("count").textContent=`${R.length} stocks, ranked from highest to lowest score. Tap a row to see why it was shortlisted.`;
+  if(view=="w")return wlv();if(view=="j")return jrv();
+  const R=cur=rows();$("count").textContent=`${R.length} stocks, ranked from highest to lowest score. Tap a row for the chart and the reasons. Tap ★ to add to your watchlist.`;
   $("tb").innerHTML=R.map((r,i)=>{
     const cls=r.score>=8?"s":r.score>=6.5?"g":"";const ch=r.pats.filter(p=>p!="Stage 2 uptrend");
-    return `<tr class="m"><td class="mu">${i+1}</td><td><b>${esc(r.sym)}</b><small>${esc(r.name)}</small></td><td><span class="sc ${cls}">${r.score.toFixed(1)}</span><small>${r.label}</small></td>
+    return `<tr class="m" data-i="${i}"><td class="mu">${i+1}</td><td><button class="st ${r.sym in WL?"on":""}" data-s="${esc(r.sym)}" aria-label="Watchlist">★</button><b>${esc(r.sym)}</b><small>${esc(r.name)}</small></td><td><span class="sc ${cls}">${r.score.toFixed(1)}</span><small>${r.label}</small></td>
     <td>${ch.slice(0,2).map(p=>`<span class="chip">${esc(p)}</span>`).join("")}${ch.length>2?`<span class="chip">+${ch.length-2}</span>`:""}</td>
     <td class="n">${f2(r.entry)}</td><td class="n">${f2(r.stop)}</td><td class="n">${f2(r.t1)}</td><td class="n">${f2(r.t2)}</td><td class="n">${r.rr.toFixed(1)}</td></tr>
-    <tr class="d" hidden><td colspan="9"><div class="dt"><div><h4>Why it was shortlisted</h4><ul>${r.why.map(w=>`<li class="${w[0]}">${esc(w[1])}</li>`).join("")}</ul></div>
+    <tr class="d" hidden><td colspan="9"><div class="ch"></div><div class="dt"><div><h4>Why it was shortlisted</h4><ul>${r.why.map(w=>`<li class="${w[0]}">${esc(w[1])}</li>`).join("")}</ul></div>
     <div><h4>Score breakdown (out of 10)</h4>${Object.entries(r.parts).map(([k,v])=>`<div class="bar"><span>${k}</span><i style="--w:${v*10}%"></i><b>${v.toFixed(1)}</b></div>`).join("")}
-    <p class="mu" style="margin:10px 0 0;font-size:13px">Target 1: ${esc(r.t1src)}${r.t2?`<br>Target 2: ${esc(r.t2src)}`:""}<br>${esc(r.sector)}</p></div></div></td></tr>`}).join("");
+    <p class="mu" style="margin:10px 0;font-size:13px">Target 1: ${esc(r.t1src)}${r.t2?`<br>Target 2: ${esc(r.t2src)}`:""}<br>${esc(r.sector)}</p><button class="jb" data-i="${i}">I bought this</button></div></div></td></tr>`}).join("");
 }
+async function chart(d,r){const el=d.querySelector(".ch");if(el.dataset.done)return;el.dataset.done=1;
+  try{CH[tf]=CH[tf]||await(await fetch(`charts_${tf}.json?`+D.last_bar)).json()}catch(e){CH[tf]={}}
+  const b=CH[tf][r.sym];if(!b){el.textContent="Chart not available.";return}
+  const cs=getComputedStyle(document.documentElement),tx=cs.getPropertyValue("--mu").trim(),gd=cs.getPropertyValue("--bd").trim();
+  const c=LightweightCharts.createChart(el,{autoSize:true,layout:{background:{color:"transparent"},textColor:tx},grid:{vertLines:{color:gd},horzLines:{color:gd}},rightPriceScale:{borderColor:gd},timeScale:{borderColor:gd}});
+  const k=c.addCandlestickSeries({upColor:"#17803d",downColor:"#c2410c",borderVisible:false,wickUpColor:"#17803d",wickDownColor:"#c2410c"});
+  k.setData(b.map(x=>({time:x[0],open:x[1],high:x[2],low:x[3],close:x[4]})));
+  const v=c.addHistogramSeries({priceFormat:{type:"volume"},priceScaleId:""});v.priceScale().applyOptions({scaleMargins:{top:.8,bottom:0}});
+  v.setData(b.map(x=>({time:x[0],value:x[5],color:x[4]>=x[1]?"#17803d55":"#c2410c55"})));
+  [[6,"#0b6b57"],[7,"#b45309"],[8,"#7c3aed"]].forEach(([i,col])=>{const l=c.addLineSeries({color:col,lineWidth:1,priceLineVisible:false,lastValueVisible:false});l.setData(b.filter(x=>x[i]!=null).map(x=>({time:x[0],value:x[i]})))});
+  [["Entry",r.entry,"#2563eb"],["Stop",r.stop,"#dc2626"],["T1",r.t1,"#16a34a"],["T2",r.t2,"#16a34a"]].forEach(([t,p,col])=>p&&k.createPriceLine({price:p,color:col,lineWidth:1,lineStyle:2,axisLabelVisible:true,title:t}));
+  c.timeScale().fitContent()}
+function wlv(){const s=Object.keys(WL),d=Object.fromEntries(D.rows.D.map(r=>[r.sym,r]));
+  $("wl").innerHTML=s.length?`<p class="mu">${s.length} stocks. Add or remove with ★ in the Scanner tab. <button id="cw">Copy symbols for alerts</button></p><div class="wrap"><table><thead><tr><th>Stock</th><th class="n">Price</th><th>Daily score</th><th>Daily patterns</th><th>Note</th><th></th></tr></thead><tbody>${s.map(x=>{const r=d[x];return `<tr><td><b>${esc(x)}</b></td><td class="n">${f2(D.px[x])}</td><td>${r?`<span class="sc">${r.score.toFixed(1)}</span>`:"–"}</td><td>${r?esc(r.pats.slice(0,3).join(", ")):'<span class="mu">No daily setup</span>'}</td><td><input data-n="${esc(x)}" value="${esc(WL[x])}" placeholder="note"></td><td><button class="rm" data-x="${esc(x)}">Remove</button></td></tr>`}).join("")}</tbody></table></div><p class="mu" style="font-size:13px">For Telegram alerts on these, paste the copied symbols into watchlist.txt in your GitHub repo.</p>`:'<p class="mu">Your watchlist is empty. Tap ★ next to a stock in the Scanner tab.</p>'}
+function jrv(){$("jr").innerHTML=JR.length?`<p class="mu">Tap “I bought this” inside a stock’s details to add trades. <button id="cj">Copy for alerts</button></p><div class="wrap"><table><thead><tr><th>Stock</th><th class="n">Bought</th><th class="n">Now</th><th class="n">P/L</th><th class="n">Stop</th><th class="n">Target 1</th><th>Status</th><th></th></tr></thead><tbody>${JR.map((j,i)=>{const p=D.px[j.sym],pl=p?(p/j.buy-1)*100:null,s=!p?"–":p<=j.stop?"Stop hit":j.t2&&p>=j.t2?"Target 2 hit":p>=j.t1?"Target 1 hit":"Open";
+    return `<tr><td><b>${esc(j.sym)}</b></td><td class="n">${f2(j.buy)}</td><td class="n">${f2(p)}</td><td class="n ${pl>=0?"ok":"no"}">${pl==null?"–":(pl>=0?"+":"")+pl.toFixed(1)+"%"}</td><td class="n">${f2(j.stop)}</td><td class="n">${f2(j.t1)}</td><td class="${s=="Stop hit"?"no":s=="Open"?"":"ok"}">${s}</td><td><button class="rm" data-x="${i}">Remove</button></td></tr>`}).join("")}</tbody></table></div><p class="mu" style="font-size:13px">For stop and target alerts on Telegram, paste the copied lines into journal.txt in your GitHub repo.</p>`:'<p class="mu">No trades yet.</p>'}
 function csv(){const R=rows(),h=["Rank","Symbol","Name","Score","Patterns","Entry","Stop","Target1","Target2","RR"];
   const l=[h].concat(R.map((r,i)=>[i+1,r.sym,r.name,r.score,r.pats.join("; "),r.entry,r.stop,r.t1,r.t2??"",r.rr]));
   const b=new Blob([l.map(x=>x.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n")],{type:"text/csv"});

@@ -1,0 +1,2 @@
+# One trade per line: SYMBOL,buy price,stop,target1,target2
+# Example: TCS,3900,3750,4100,4300

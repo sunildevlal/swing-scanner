@@ -232,6 +232,67 @@ def load(tickers):
     return out
 
 
+def read_list(fn):
+    try: return [x.strip() for x in open(fn, encoding="utf-8") if x.strip() and not x.startswith("#")]
+    except FileNotFoundError: return []
+
+
+def chart_data(d, tf):
+    f, mm, s = P[tf]["ma"]; x = resample(d, tf)
+    x = x.assign(ef=ema(x.c, f), sm=x.c.rolling(mm).mean(), sl=x.c.rolling(s).mean()).tail(120)
+    return [[i.strftime("%Y-%m-%d")] + [None if pd.isna(y) else round(float(y), 2) for y in row]
+            for i, row in zip(x.index, x[["o", "h", "l", "c", "v", "ef", "sm", "sl"]].values)]
+
+
+def tg(text):
+    for i in range(0, len(text), 4000):
+        requests.post(f"https://api.telegram.org/bot{os.environ['TG_TOKEN']}/sendMessage", timeout=30,
+                      data={"chat_id": os.environ["TG_CHAT"], "text": text[i:i + 4000], "disable_web_page_preview": True}).raise_for_status()
+
+
+def fmt(rs):
+    return "\n".join(f"{i}. {r['sym']}  {r['score']} ({r['label']})\n   {', '.join([p for p in r['pats'] if p != 'Stage 2 uptrend'][:3])}\n"
+                     f"   Entry {r['entry']} | SL {r['stop']} | T1 {r['t1']} | T2 {r['t2'] or '-'} | R:R {r['rr']}" for i, r in enumerate(rs, 1))
+
+
+def alerts(out, rows, watch, journal, day):
+    """Telegram: top 10 new setups with score 7+, watchlist setups, journal stop/target hits."""
+    if not (os.environ.get("TG_TOKEN") and os.environ.get("TG_CHAT")): return
+    try: st = json.load(open("docs/sent.json"))
+    except Exception: st = {}
+    m = out["market"]; nm = {"D": "Daily", "W": "Weekly", "M": "Monthly"}
+    msgs = [f"NSE Swing Scanner, data of {out['last_bar']}\nMarket: {m['mood']}. Nifty is {'above' if m['a50'] else 'below'} its 50 DMA and "
+            f"{'above' if m['a200'] else 'below'} its 200 DMA; {m['b50']}% of stocks are above their 50 DMA."
+            + ("\nCaution: weak market, breakouts fail more often." if m["mood"] == "Weak" else "")]
+    nx = day + pd.offsets.BDay(1)
+    due = {"D": True, "W": nx.isocalendar()[:2] != day.isocalendar()[:2], "M": nx.month != day.month}  # weekly/monthly on last trading day
+    new_any = False
+    for tf in "DWM":
+        if not due[tf]: continue
+        good = [r for r in rows[tf] if r["score"] >= 7]; seen = set(st.get(tf, []))
+        new = [r for r in good if r["sym"] not in seen][:10]
+        if new: msgs.append(f"{nm[tf]} setups scoring 7+ (new, top {len(new)}):\n" + fmt(new)); new_any = True
+        st[tf] = [r["sym"] for r in good]
+        wl = [r for r in rows[tf] if r["sym"] in watch]; ws = set(st.get("w" + tf, []))
+        if [r for r in wl if r["sym"] not in ws]: msgs.append(f"Watchlist: new {nm[tf].lower()} setup:\n" + fmt([r for r in wl if r["sym"] not in ws]))
+        st["w" + tf] = [r["sym"] for r in wl]
+    if not new_any: msgs.insert(1, "No new setups scoring 7+ today.")
+    jl = st.get("j", []); txt = {"STOP": "hit its stop-loss", "T1": "reached Target 1", "T2": "reached Target 2"}
+    for line in journal:
+        p = [x.strip() for x in line.split(",")]
+        try: sym, buy, stop, t1 = p[0].upper(), float(p[1]), float(p[2]), float(p[3]); t2 = float(p[4]) if len(p) > 4 and p[4] else None
+        except Exception: continue
+        px = out["px"].get(sym)
+        if px is None: continue
+        ev = "STOP" if px <= stop else "T2" if t2 and px >= t2 else "T1" if px >= t1 else None
+        if ev and f"{sym}:{buy}:{ev}" not in jl:
+            msgs.append(f"Journal: {sym} {txt[ev]}. Price {px}, bought at {buy} ({(px / buy - 1) * 100:+.1f}%)."); jl.append(f"{sym}:{buy}:{ev}")
+    st["j"] = jl
+    o, _, rp = os.environ.get("GITHUB_REPOSITORY", "").partition("/")
+    tg("\n\n".join(msgs) + (f"\n\nhttps://{o}.github.io/{rp}/" if rp else ""))
+    json.dump(st, open("docs/sent.json", "w"))
+
+
 def main():
     meta = universe(); data = load([s + ".NS" for s in meta]); nf = load(["^NSEI"])["^NSEI"]
     ret = lambda d, k: d.c.iloc[-1] / d.c.iloc[-k - 1] - 1 if len(d) > k else np.nan
@@ -258,11 +319,23 @@ def main():
     now = dt.datetime.now(dt.timezone(dt.timedelta(hours=5.5)))
     out = dict(updated=now.strftime("%d %b %Y, %H:%M IST"), last_bar=nf.index[-1].strftime("%d %b %Y"),
                market=dict(nifty=round(float(n.iloc[-1]), 2), a50=a50, a200=a200, b50=round(b50), b200=round(b200),
-                           mood="Healthy" if health == 1 else "Mixed" if health >= .66 else "Weak"), rows=rows)
+                           mood="Healthy" if health == 1 else "Mixed" if health >= .66 else "Weak"), rows=rows,
+               px={t[:-3]: round(float(d.c.iloc[-1]), 2) for t, d in data.items()})
     os.makedirs("docs", exist_ok=True)
     txt = json.dumps(out, separators=(",", ":"), default=lambda x: x.item() if hasattr(x, "item") else str(x))
     open("docs/data.json", "w", encoding="utf-8").write(txt.replace("NaN", "null"))
     print({k: len(v) for k, v in rows.items()}, "results")
+    watch = {x.upper() for x in read_list("watchlist.txt")}; journal = read_list("journal.txt")
+    extra = list(watch | {l.split(",")[0].strip().upper() for l in journal})
+    for tf in rows:  # chart data for the top 80 of each timeframe plus watchlist and journal stocks
+        ch = {}
+        for sy in dict.fromkeys([r["sym"] for r in rows[tf][:80]] + extra):
+            if sy + ".NS" in data and len(data[sy + ".NS"]) > 60:
+                try: ch[sy] = chart_data(data[sy + ".NS"], tf)
+                except Exception as e: print("chart", sy, tf, e)
+        open(f"docs/charts_{tf}.json", "w").write(json.dumps(ch, separators=(",", ":")))
+    try: alerts(out, rows, watch, journal, nf.index[-1])
+    except Exception as e: print("alerts failed:", e)
 
 
 if __name__ == "__main__":

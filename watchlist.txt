@@ -1,0 +1,2 @@
+# One NSE symbol per line, for example:
+# RELIANCE
