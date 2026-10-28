@@ -1,6 +1,6 @@
 """NSE swing scanner. Run after market close from the repo root: python scanner/scan.py
 Writes docs/data.json, which the website reads."""
-import io, json, os, datetime as dt
+import io, json, os, re, datetime as dt
 import numpy as np, pandas as pd, requests, yfinance as yf
 
 BASE = "https://nsearchives.nseindia.com/content/indices/"
@@ -200,6 +200,29 @@ def analyze(df, tf, ctx):
                 rr=round(float(rr), 2), why=why, parts={k_: round(float(x) * 10, 1) for k_, x in parts.items()})
 
 
+# Bearish scan = the bullish scan run on mirrored prices (k/price), then mapped back and re-worded.
+SWAP = {"above": "below", "below": "above", "Breakout": "Breakdown", "breakout": "breakdown", "Broke out": "Broke down", "Breakdown": "Breakout",
+        "Stage 2 uptrend": "Stage 4 downtrend", "(Stage 2)": "(Stage 4)", "Cup and handle": "Inverted cup and handle", "Double bottom": "Double top",
+        "Ascending triangle": "Descending triangle", "Bull flag": "Bear flag", "Bullish": "Bearish", "Hammer": "Shooting star", "Pullback to": "Rally to",
+        "Pulled back": "Rallied", "an uptrend": "a downtrend", "uptrend": "downtrend", "52-week high": "52-week low", "high": "low", "low": "high", "highs": "lows", "lows": "highs",
+        "rising lows": "falling highs", "rally": "drop", "rising": "falling", "RSI turn-up": "RSI turn-down", "turning up": "turning down", "upward": "downward",
+        "resistance": "support", "support": "resistance", "Overbought": "Oversold", "buy": "sell", "ahead of": "weaker than", "not up": "not down",
+        "a small pullback": "a small bounce", "Breakout volume is below average": "Breakdown volume is below average", "Retesting the broken resistance": "Retesting the broken support"}
+SWAP_RE = re.compile("|".join(re.escape(k) for k in sorted(SWAP, key=len, reverse=True)))
+
+
+def analyze_bear(df, tf, ctx):
+    k = float(df.c.iloc[-1]) ** 2
+    inv = pd.DataFrame({"o": k / df.o, "h": k / df.l, "l": k / df.h, "c": k / df.c, "v": df.v})
+    r = analyze(inv, tf, ctx)
+    if not r: return None
+    tx = lambda s: SWAP_RE.sub(lambda m: SWAP[m.group()], re.sub(r"₹([\d.]+)", lambda m: f"₹{k / float(m.group(1)):.2f}", s))
+    px, stop, t1, t2 = r["px"], round(k / r["stop"], 2), round(k / r["t1"], 2), (round(k / r["t2"], 2) if r["t2"] else None)
+    r.update(entry=px, stop=stop, t1=t1, t2=t2, rr=round((px - t1) / max(stop - px, 1e-9), 2), pats=[tx(p) for p in r["pats"]],
+             t1src=tx(r["t1src"]), t2src=tx(r["t2src"]), why=[[a, tx(b)] for a, b in r["why"]])
+    return r
+
+
 def resample(d, tf):
     if tf == "D": return d
     return d.resample("W-FRI" if tf == "W" else "ME").agg({"o": "first", "h": "max", "l": "min", "c": "last", "v": "sum"}).dropna()
@@ -255,8 +278,8 @@ def fmt(rs):
                      f"   Entry {r['entry']} | SL {r['stop']} | T1 {r['t1']} | T2 {r['t2'] or '-'} | R:R {r['rr']}" for i, r in enumerate(rs, 1))
 
 
-def alerts(out, rows, watch, journal, day):
-    """Telegram: top 10 new setups with score 7+, watchlist setups, journal stop/target hits."""
+def alerts(out, rows, bear, watch, journal, day, ideas):
+    """Telegram: top 10 new setups (bullish and bearish) scoring 7+, option ideas, watchlist setups, journal stop/target hits."""
     if not (os.environ.get("TG_TOKEN") and os.environ.get("TG_CHAT")): return
     try: st = json.load(open("docs/sent.json"))
     except Exception: st = {}
@@ -267,26 +290,36 @@ def alerts(out, rows, watch, journal, day):
     nx = day + pd.offsets.BDay(1)
     due = {"D": True, "W": nx.isocalendar()[:2] != day.isocalendar()[:2], "M": nx.month != day.month}  # weekly/monthly on last trading day
     new_any = False
-    for tf in "DWM":
-        if not due[tf]: continue
-        good = [r for r in rows[tf] if r["score"] >= 7]; seen = set(st.get(tf, []))
-        new = [r for r in good if r["sym"] not in seen][:10]
-        if new: msgs.append(f"{nm[tf]} setups scoring 7+ (new, top {len(new)}):\n" + fmt(new)); new_any = True
-        st[tf] = [r["sym"] for r in good]
-        wl = [r for r in rows[tf] if r["sym"] in watch]; ws = set(st.get("w" + tf, []))
-        if [r for r in wl if r["sym"] not in ws]: msgs.append(f"Watchlist: new {nm[tf].lower()} setup:\n" + fmt([r for r in wl if r["sym"] not in ws]))
-        st["w" + tf] = [r["sym"] for r in wl]
+    for pre, src, lab in (("", rows, ""), ("b", bear, "Bearish ")):
+        for tf in "DWM":
+            if not due[tf]: continue
+            good = [r for r in src[tf] if r["score"] >= 7]; seen = set(st.get(pre + tf, []))
+            new = [r for r in good if r["sym"] not in seen][:10]
+            if new: msgs.append(f"{lab}{nm[tf]} setups scoring 7+ (new, top {len(new)}):\n" + fmt(new)); new_any = True
+            st[pre + tf] = [r["sym"] for r in good]
+            if pre: continue
+            wl = [r for r in rows[tf] if r["sym"] in watch]; ws = set(st.get("w" + tf, []))
+            if [r for r in wl if r["sym"] not in ws]: msgs.append(f"Watchlist: new {nm[tf].lower()} setup:\n" + fmt([r for r in wl if r["sym"] not in ws]))
+            st["w" + tf] = [r["sym"] for r in wl]
+    oi = [i for i in ideas if i["score"] >= 7]; ok = lambda i: f"{i['sym']}:{i['side']}:{i['expiry']}"; seen = set(st.get("o", []))
+    on = [i for i in oi if ok(i) not in seen][:5]
+    if on:
+        new_any = True
+        msgs.append("Option ideas scoring 7+ (new):\n" + "\n".join(
+            f"{n}. {i['sym']} {i['structs'][i['best']]['name']}, expiry {i['expiry']}, score {i['score']}\n   {' / '.join(i['structs'][i['best']]['legs'])}\n"
+            f"   Max loss per lot ₹{i['structs'][i['best']]['risk']:,}; at Target 1 about ₹{i['structs'][i['best']]['pt']:,}" for n, i in enumerate(on, 1)))
+    st["o"] = [ok(i) for i in oi]
     if not new_any: msgs.insert(1, "No new setups scoring 7+ today.")
     jl = st.get("j", []); txt = {"STOP": "hit its stop-loss", "T1": "reached Target 1", "T2": "reached Target 2"}
     for line in journal:
         p = [x.strip() for x in line.split(",")]
         try: sym, buy, stop, t1 = p[0].upper(), float(p[1]), float(p[2]), float(p[3]); t2 = float(p[4]) if len(p) > 4 and p[4] else None
         except Exception: continue
-        px = out["px"].get(sym)
+        b = len(p) > 5 and p[5].lower() == "bear"; px = out["px"].get(sym)
         if px is None: continue
-        ev = "STOP" if px <= stop else "T2" if t2 and px >= t2 else "T1" if px >= t1 else None
+        ev = ("STOP" if (px >= stop if b else px <= stop) else "T2" if t2 and (px <= t2 if b else px >= t2) else "T1" if (px <= t1 if b else px >= t1) else None)
         if ev and f"{sym}:{buy}:{ev}" not in jl:
-            msgs.append(f"Journal: {sym} {txt[ev]}. Price {px}, bought at {buy} ({(px / buy - 1) * 100:+.1f}%)."); jl.append(f"{sym}:{buy}:{ev}")
+            msgs.append(f"Journal: {sym} {txt[ev]}. Price {px}, entry {buy} ({(px / buy - 1) * 100 * (-1 if b else 1):+.1f}% in your favour)."); jl.append(f"{sym}:{buy}:{ev}")
     st["j"] = jl
     o, _, rp = os.environ.get("GITHUB_REPOSITORY", "").partition("/")
     tg("\n\n".join(msgs) + (f"\n\nhttps://{o}.github.io/{rp}/" if rp else ""))
@@ -303,7 +336,7 @@ def main():
     b50 = float(np.mean([d.c.iloc[-1] > d.c.rolling(50).mean().iloc[-1] for d in data.values() if len(d) > 60]) * 100)
     b200 = float(np.mean([d.c.iloc[-1] > d.c.rolling(200).mean().iloc[-1] for d in data.values() if len(d) > 210]) * 100)
     health = (a50 + a200 + (b50 > 50)) / 3
-    rows = {"D": [], "W": [], "M": []}
+    rows = {"D": [], "W": [], "M": []}; bear = {"D": [], "W": [], "M": []}
     for t, d in data.items():
         sym = t[:-3]; m = meta[sym]
         if len(d) < 260 or np.isnan(rs.get(t, np.nan)): continue
@@ -311,15 +344,18 @@ def main():
         va = d.v.iloc[-21:-1].mean(); vr = float(d.v.iloc[-1] / va) if va > 0 else 1.
         sec = float(sec_rank.get(m["sector"], .5))
         ctx = dict(rs=float(rs[t]), vr=vr, ms=.5 * sec + .5 * health)
+        ctxb = dict(rs=1 - float(rs[t]), vr=vr, ms=.5 * (1 - sec) + .5 * (1 - health))
         for tf in rows:
-            try: res = analyze(resample(d, tf), tf, ctx)
-            except Exception as e: print("skip", sym, tf, e); res = None
-            if res: res.update(sym=sym, name=m["name"], sector=m["sector"], uni=m["uni"]); rows[tf].append(res)
-    for tf in rows: rows[tf].sort(key=lambda r: -r["score"])
+            x = resample(d, tf)
+            for dst, fn, cx in ((rows, analyze, ctx), (bear, analyze_bear, ctxb)):
+                try: res = fn(x, tf, cx)
+                except Exception as e: print("skip", sym, tf, e); res = None
+                if res: res.update(sym=sym, name=m["name"], sector=m["sector"], uni=m["uni"]); dst[tf].append(res)
+    for tf in rows: rows[tf].sort(key=lambda r: -r["score"]); bear[tf].sort(key=lambda r: -r["score"])
     now = dt.datetime.now(dt.timezone(dt.timedelta(hours=5.5)))
     out = dict(updated=now.strftime("%d %b %Y, %H:%M IST"), last_bar=nf.index[-1].strftime("%d %b %Y"),
                market=dict(nifty=round(float(n.iloc[-1]), 2), a50=a50, a200=a200, b50=round(b50), b200=round(b200),
-                           mood="Healthy" if health == 1 else "Mixed" if health >= .66 else "Weak"), rows=rows,
+                           mood="Healthy" if health == 1 else "Mixed" if health >= .66 else "Weak"), rows=rows, bear=bear,
                px={t[:-3]: round(float(d.c.iloc[-1]), 2) for t, d in data.items()})
     os.makedirs("docs", exist_ok=True)
     txt = json.dumps(out, separators=(",", ":"), default=lambda x: x.item() if hasattr(x, "item") else str(x))
@@ -329,12 +365,31 @@ def main():
     extra = list(watch | {l.split(",")[0].strip().upper() for l in journal})
     for tf in rows:  # chart data for the top 80 of each timeframe plus watchlist and journal stocks
         ch = {}
-        for sy in dict.fromkeys([r["sym"] for r in rows[tf][:80]] + extra):
+        for sy in dict.fromkeys([r["sym"] for r in rows[tf][:80]] + [r["sym"] for r in bear[tf][:80]] + extra):
             if sy + ".NS" in data and len(data[sy + ".NS"]) > 60:
                 try: ch[sy] = chart_data(data[sy + ".NS"], tf)
                 except Exception as e: print("chart", sy, tf, e)
         open(f"docs/charts_{tf}.json", "w").write(json.dumps(ch, separators=(",", ":")))
-    try: alerts(out, rows, watch, journal, nf.index[-1])
+    ideas = []
+    try:  # option ideas for the best bullish (calls) and bearish (puts) setups, plus Nifty and Bank Nifty
+        import options
+        ext = load(["^NSEBANK", "^INDIAVIX"]); idx = {}
+        cands = [(r["sym"], "bull", r) for r in rows["D"][:30] if r["score"] >= 6] + [(r["sym"], "bear", r) for r in bear["D"][:30] if r["score"] >= 6]
+        for nm_, d in (("NIFTY", nf), ("BANKNIFTY", ext.get("^NSEBANK"))):
+            if d is None or len(d) < 260: continue
+            c = d.c; idx[nm_] = dict(spot=round(float(c.iloc[-1]), 2), chg=round(float((c.iloc[-1] / c.iloc[-2] - 1) * 100), 2),
+                                     a50=bool(c.iloc[-1] > c.rolling(50).mean().iloc[-1]), a200=bool(c.iloc[-1] > c.rolling(200).mean().iloc[-1]))
+            for side, fn, ms in (("bull", analyze, health), ("bear", analyze_bear, 1 - health)):
+                res = fn(d, "D", dict(rs=.5, vr=1., ms=ms))
+                if res: res.update(sym=nm_, name=nm_); cands.append((nm_, side, res))
+        summary, ideas = options.run(cands, idx, nf.index[-1])
+        vx = ext.get("^INDIAVIX"); summary["vix"] = round(float(vx.c.iloc[-1]), 1) if vx is not None else None
+        out["px"].update({k: v["spot"] for k, v in idx.items()})
+        jd = lambda x: x.item() if hasattr(x, "item") else str(x)
+        open("docs/options.json", "w", encoding="utf-8").write(json.dumps(summary, separators=(",", ":"), default=jd).replace("NaN", "null"))
+        open("docs/data.json", "w", encoding="utf-8").write(json.dumps(out, separators=(",", ":"), default=jd).replace("NaN", "null"))
+    except Exception as e: print("options failed:", e)
+    try: alerts(out, rows, bear, watch, journal, nf.index[-1], ideas)
     except Exception as e: print("alerts failed:", e)
 
 

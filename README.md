@@ -33,3 +33,10 @@ Stop-loss is below the nearest swing low, limited to 3 ATR.
 3. In GitHub: **Settings > Secrets and variables > Actions > New repository secret.** Add `TG_TOKEN` (the token) and `TG_CHAT` (the chat id).
 4. Run the "Daily scan" action. You get the market mood, up to 10 new setups scoring 7+, watchlist setups, and journal stop or target hits.
 Weekly setups arrive on the last trading day of the week, monthly setups on the last trading day of the month.
+
+## Bearish setups and Options (new)
+- **Bearish setups:** in the Scanner tab, use the first dropdown to switch to bearish setups (breakdowns, rallies into falling averages, double tops and so on). Same score, reasons, targets (next support below) and stop (above resistance).
+- **Options tab:** for the best bullish and bearish setups in the F&O list, plus Nifty and Bank Nifty, it compares a long call or put, a debit spread and a credit spread, and highlights the best one with a 1 to 10 score. It uses free NSE end-of-day option data, so no Zerodha API or login is needed. Premiums after 3 days (at Target 1) and 2 days (at the stop) are estimated with the Black-Scholes model.
+- **IV percentile** needs about 20 trading days of history. The scanner saves `docs/ivhist.json` every day, so it becomes available automatically.
+- If NSE blocks the F&O download, save the day's F&O bhavcopy CSV as `scanner/universe/fo_bhavcopy.csv`.
+- Journal lines for bearish trades end with `,bear` (the Copy button adds this for you).

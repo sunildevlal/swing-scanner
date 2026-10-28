@@ -48,6 +48,7 @@ li::before{position:absolute;left:0;font-weight:700}li.g::before{content:"✓";c
 .ch{height:340px;margin-bottom:14px}.ok{color:var(--g)}
 .jb,.rm,#cw,#cj{font:inherit;font-size:14px;padding:6px 12px;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--tx);cursor:pointer}
 td input{font:inherit;padding:5px 8px;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--tx);width:100%;min-width:130px}
+.ic{border:1px solid var(--bd);border-radius:8px;padding:8px 12px;background:var(--card);flex:1;min-width:260px;font-size:14px}.ic small{display:block;color:var(--mu);margin-top:2px}#ox{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -55,10 +56,11 @@ td input{font:inherit;padding:5px 8px;border:1px solid var(--bd);border-radius:6
 <main>
 <header><h1>NSE Swing Scanner</h1><span class="mu" id="upd"></span></header>
 <div id="mkt"></div>
-<div class="tabs" id="views"><button data-v="s" class="on">Scanner</button><button data-v="w">Watchlist</button><button data-v="j">Journal</button></div>
+<div class="tabs" id="views"><button data-v="s" class="on">Scanner</button><button data-v="o">Options</button><button data-v="w">Watchlist</button><button data-v="j">Journal</button></div>
 <section id="scan">
 <div class="tabs" id="tabs"><button data-t="D" class="on">Daily</button><button data-t="W">Weekly</button><button data-t="M">Monthly</button></div>
 <div class="ctl">
+  <select id="dir" aria-label="Direction"><option value="bull">Bullish setups</option><option value="bear">Bearish setups</option></select>
   <select id="uni" aria-label="Universe"><option value="n500">Nifty 500</option><option value="n200">Nifty 200</option><option value="n100">Nifty 100 / Largecap</option><option value="mid">Midcap 150</option><option value="small">Smallcap 250</option></select>
   <select id="pat" aria-label="Pattern"></select>
   <select id="min" aria-label="Minimum score"><option value="0">Any score</option><option value="5">Score 5+</option><option value="6.5">Score 6.5+</option><option value="8">Score 8+</option></select>
@@ -72,7 +74,7 @@ td input{font:inherit;padding:5px 8px;border:1px solid var(--bd);border-radius:6
 <thead><tr><th>#</th><th>Stock</th><th>Score</th><th>Patterns</th><th class="n">Entry</th><th class="n">Stop</th><th class="n">Target 1</th><th class="n">Target 2</th><th class="n">R:R</th></tr></thead>
 <tbody id="tb"></tbody></table></div>
 </section>
-<section id="wl" hidden></section><section id="jr" hidden></section>
+<section id="op" hidden></section><section id="wl" hidden></section><section id="jr" hidden></section>
 <p class="mu" style="font-size:13px;margin-top:14px">Scanner output is a list of candidates, not advice. Check the chart and news before you trade. Entry is the last close; weekly and monthly use the bar still in progress.</p>
 </main>
 <script>
@@ -88,32 +90,36 @@ function init(){
   $("upd").textContent=`Data as of ${D.last_bar} · updated ${D.updated}`;
   $("mkt").innerHTML=`<span>Market: <b class="${m.mood=="Healthy"?"ok":"no"}">${m.mood}</b></span><span>Nifty ${f2(m.nifty)}: ${y(m.a50)} 50 DMA, ${y(m.a200)} 200 DMA</span><span>Stocks above 50 DMA: <b>${m.b50}%</b></span><span>Above 200 DMA: <b>${m.b200}%</b></span>`;
   document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{tf=b.dataset.t;document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x==b));fillPats();render()});
-  document.querySelectorAll("#views button").forEach(b=>b.onclick=()=>{view=b.dataset.v;document.querySelectorAll("#views button").forEach(x=>x.classList.toggle("on",x==b));$("scan").hidden=view!="s";$("wl").hidden=view!="w";$("jr").hidden=view!="j";render()});
-  ["uni","pat","min","rr","s2"].forEach(i=>$(i).onchange=render);$("q").oninput=render;$("csv").onclick=csv;
+  document.querySelectorAll("#views button").forEach(b=>b.onclick=()=>{view=b.dataset.v;document.querySelectorAll("#views button").forEach(x=>x.classList.toggle("on",x==b));$("scan").hidden=view!="s";$("op").hidden=view!="o";$("wl").hidden=view!="w";$("jr").hidden=view!="j";render()});
+  ["uni","pat","min","rr","s2"].forEach(i=>$(i).onchange=render);$("q").oninput=render;$("dir").onchange=()=>{fillPats();render()};$("csv").onclick=csv;
   $("tb").onclick=e=>{
     const st=e.target.closest(".st");if(st){const s=st.dataset.s;if(s in WL)delete WL[s];else WL[s]="";sv("wl",WL);st.classList.toggle("on");return}
     const jb=e.target.closest(".jb");if(jb){const r=cur[+jb.dataset.i],p=prompt("Buy price for "+r.sym,r.entry);if(p&&+p>0){JR.push({sym:r.sym,buy:+p,stop:r.stop,t1:r.t1,t2:r.t2});sv("jr",JR);jb.textContent="Added to journal"}return}
     const t=e.target.closest("tr.m");if(t){const d=t.nextElementSibling;d.hidden=!d.hidden;if(!d.hidden)chart(d,cur[+t.dataset.i])}};
   $("wl").onclick=e=>{const x=e.target.closest(".rm");if(x){delete WL[x.dataset.x];sv("wl",WL);wlv()}if(e.target.id=="cw")cp(Object.keys(WL).join("\n"),e.target)};
   $("wl").oninput=e=>{if(e.target.dataset.n){WL[e.target.dataset.n]=e.target.value;sv("wl",WL)}};
-  $("jr").onclick=e=>{const x=e.target.closest(".rm");if(x){JR.splice(+x.dataset.x,1);sv("jr",JR);jrv()}if(e.target.id=="cj")cp(JR.map(j=>[j.sym,j.buy,j.stop,j.t1,j.t2||""].join(",")).join("\n"),e.target)};
+  $("jr").onclick=e=>{const x=e.target.closest(".rm");if(x){JR.splice(+x.dataset.x,1);sv("jr",JR);jrv()}if(e.target.id=="cj")cp(JR.map(j=>[j.sym,j.buy,j.stop,j.t1,j.t2||"",j.dir||"bull"].join(",")).join("\n"),e.target)};
+  $("op").onchange=e=>{if(e.target.id=="os"){OS=e.target.value;opv()}};
+  $("op").onclick=e=>{const jb=e.target.closest(".jb");if(jb){const i=OR[+jb.dataset.n],p=prompt("Price of "+i.sym+" at your entry",i.spot);if(p&&+p>0){JR.push({sym:i.sym,buy:+p,stop:i.stop,t1:i.t1,t2:i.t2,dir:i.side,lab:i.structs[i.best].name+" "+i.expiry});sv("jr",JR);jb.textContent="Added to journal"}return}
+    const t=e.target.closest("tr.m");if(t)t.nextElementSibling.hidden=!t.nextElementSibling.hidden};
   fillPats();
 }
-function fillPats(){const s=new Set();D.rows[tf].forEach(r=>r.pats.forEach(p=>s.add(p)));
+const DR=()=>$("dir").value=="bear"?D.bear:D.rows;
+function fillPats(){const s=new Set();DR()[tf].forEach(r=>r.pats.forEach(p=>s.add(p)));
   $("pat").innerHTML='<option value="all">All patterns</option>'+[...s].sort().map(p=>`<option>${esc(p)}</option>`).join("")}
 function rows(){const u=$("uni").value,p=$("pat").value,ms=+$("min").value,rr=+$("rr").value,q=$("q").value.trim().toLowerCase(),s2=$("s2").checked;
-  return D.rows[tf].filter(r=>r.uni.includes(u)&&(p=="all"||r.pats.includes(p))&&r.score>=ms&&r.rr>=rr&&(!s2||r.pats.includes("Stage 2 uptrend"))&&(!q||r.sym.toLowerCase().includes(q)||r.name.toLowerCase().includes(q)))}
+  return DR()[tf].filter(r=>r.uni.includes(u)&&(p=="all"||r.pats.includes(p))&&r.score>=ms&&r.rr>=rr&&(!s2||r.pats.some(p=>p.startsWith("Stage")))&&(!q||r.sym.toLowerCase().includes(q)||r.name.toLowerCase().includes(q)))}
 function render(){
-  if(view=="w")return wlv();if(view=="j")return jrv();
+  if(view=="o")return opv();if(view=="w")return wlv();if(view=="j")return jrv();
   const R=cur=rows();$("count").textContent=`${R.length} stocks, ranked from highest to lowest score. Tap a row for the chart and the reasons. Tap ★ to add to your watchlist.`;
   $("tb").innerHTML=R.map((r,i)=>{
-    const cls=r.score>=8?"s":r.score>=6.5?"g":"";const ch=r.pats.filter(p=>p!="Stage 2 uptrend");
+    const cls=r.score>=8?"s":r.score>=6.5?"g":"";const ch=r.pats.filter(p=>!p.startsWith("Stage"));
     return `<tr class="m" data-i="${i}"><td class="mu">${i+1}</td><td><button class="st ${r.sym in WL?"on":""}" data-s="${esc(r.sym)}" aria-label="Watchlist">★</button><b>${esc(r.sym)}</b><small>${esc(r.name)}</small></td><td><span class="sc ${cls}">${r.score.toFixed(1)}</span><small>${r.label}</small></td>
     <td>${ch.slice(0,2).map(p=>`<span class="chip">${esc(p)}</span>`).join("")}${ch.length>2?`<span class="chip">+${ch.length-2}</span>`:""}</td>
     <td class="n">${f2(r.entry)}</td><td class="n">${f2(r.stop)}</td><td class="n">${f2(r.t1)}</td><td class="n">${f2(r.t2)}</td><td class="n">${r.rr.toFixed(1)}</td></tr>
     <tr class="d" hidden><td colspan="9"><div class="ch"></div><div class="dt"><div><h4>Why it was shortlisted</h4><ul>${r.why.map(w=>`<li class="${w[0]}">${esc(w[1])}</li>`).join("")}</ul></div>
     <div><h4>Score breakdown (out of 10)</h4>${Object.entries(r.parts).map(([k,v])=>`<div class="bar"><span>${k}</span><i style="--w:${v*10}%"></i><b>${v.toFixed(1)}</b></div>`).join("")}
-    <p class="mu" style="margin:10px 0;font-size:13px">Target 1: ${esc(r.t1src)}${r.t2?`<br>Target 2: ${esc(r.t2src)}`:""}<br>${esc(r.sector)}</p><button class="jb" data-i="${i}">I bought this</button></div></div></td></tr>`}).join("");
+    <p class="mu" style="margin:10px 0;font-size:13px">Target 1: ${esc(r.t1src)}${r.t2?`<br>Target 2: ${esc(r.t2src)}`:""}<br>${esc(r.sector)}</p>${$("dir").value=="bear"?'<span class="mu">To profit from a fall, see the put ideas in the Options tab.</span>':`<button class="jb" data-i="${i}">I bought this</button>`}</div></div></td></tr>`}).join("");
 }
 async function chart(d,r){const el=d.querySelector(".ch");if(el.dataset.done)return;el.dataset.done=1;
   try{CH[tf]=CH[tf]||await(await fetch(`charts_${tf}.json?`+D.last_bar)).json()}catch(e){CH[tf]={}}
@@ -129,8 +135,24 @@ async function chart(d,r){const el=d.querySelector(".ch");if(el.dataset.done)ret
   c.timeScale().fitContent()}
 function wlv(){const s=Object.keys(WL),d=Object.fromEntries(D.rows.D.map(r=>[r.sym,r]));
   $("wl").innerHTML=s.length?`<p class="mu">${s.length} stocks. Add or remove with ★ in the Scanner tab. <button id="cw">Copy symbols for alerts</button></p><div class="wrap"><table><thead><tr><th>Stock</th><th class="n">Price</th><th>Daily score</th><th>Daily patterns</th><th>Note</th><th></th></tr></thead><tbody>${s.map(x=>{const r=d[x];return `<tr><td><b>${esc(x)}</b></td><td class="n">${f2(D.px[x])}</td><td>${r?`<span class="sc">${r.score.toFixed(1)}</span>`:"–"}</td><td>${r?esc(r.pats.slice(0,3).join(", ")):'<span class="mu">No daily setup</span>'}</td><td><input data-n="${esc(x)}" value="${esc(WL[x])}" placeholder="note"></td><td><button class="rm" data-x="${esc(x)}">Remove</button></td></tr>`}).join("")}</tbody></table></div><p class="mu" style="font-size:13px">For Telegram alerts on these, paste the copied symbols into watchlist.txt in your GitHub repo.</p>`:'<p class="mu">Your watchlist is empty. Tap ★ next to a stock in the Scanner tab.</p>'}
-function jrv(){$("jr").innerHTML=JR.length?`<p class="mu">Tap “I bought this” inside a stock’s details to add trades. <button id="cj">Copy for alerts</button></p><div class="wrap"><table><thead><tr><th>Stock</th><th class="n">Bought</th><th class="n">Now</th><th class="n">P/L</th><th class="n">Stop</th><th class="n">Target 1</th><th>Status</th><th></th></tr></thead><tbody>${JR.map((j,i)=>{const p=D.px[j.sym],pl=p?(p/j.buy-1)*100:null,s=!p?"–":p<=j.stop?"Stop hit":j.t2&&p>=j.t2?"Target 2 hit":p>=j.t1?"Target 1 hit":"Open";
-    return `<tr><td><b>${esc(j.sym)}</b></td><td class="n">${f2(j.buy)}</td><td class="n">${f2(p)}</td><td class="n ${pl>=0?"ok":"no"}">${pl==null?"–":(pl>=0?"+":"")+pl.toFixed(1)+"%"}</td><td class="n">${f2(j.stop)}</td><td class="n">${f2(j.t1)}</td><td class="${s=="Stop hit"?"no":s=="Open"?"":"ok"}">${s}</td><td><button class="rm" data-x="${i}">Remove</button></td></tr>`}).join("")}</tbody></table></div><p class="mu" style="font-size:13px">For stop and target alerts on Telegram, paste the copied lines into journal.txt in your GitHub repo.</p>`:'<p class="mu">No trades yet.</p>'}
+function jrv(){$("jr").innerHTML=JR.length?`<p class="mu">Tap “I bought this” inside a stock’s details to add trades. <button id="cj">Copy for alerts</button></p><div class="wrap"><table><thead><tr><th>Stock</th><th class="n">Entry (stock)</th><th class="n">Now</th><th class="n">P/L</th><th class="n">Stop</th><th class="n">Target 1</th><th>Status</th><th></th></tr></thead><tbody>${JR.map((j,i)=>{const b=j.dir=="bear",p=D.px[j.sym],pl=p?(p/j.buy-1)*100*(b?-1:1):null,h=(a,c)=>b?a>=c:a<=c,u=(a,c)=>b?a<=c:a>=c,s=!p?"–":h(p,j.stop)?"Stop hit":j.t2&&u(p,j.t2)?"Target 2 hit":u(p,j.t1)?"Target 1 hit":"Open";
+    return `<tr><td><b>${esc(j.sym)}</b>${j.lab?`<small>${esc(j.lab)}</small>`:""}</td><td class="n">${f2(j.buy)}</td><td class="n">${f2(p)}</td><td class="n ${pl>=0?"ok":"no"}">${pl==null?"–":(pl>=0?"+":"")+pl.toFixed(1)+"%"}</td><td class="n">${f2(j.stop)}</td><td class="n">${f2(j.t1)}</td><td class="${s=="Stop hit"?"no":s=="Open"?"":"ok"}">${s}</td><td><button class="rm" data-x="${i}">Remove</button></td></tr>`}).join("")}</tbody></table></div><p class="mu" style="font-size:13px">For stop and target alerts on Telegram, paste the copied lines into journal.txt in your GitHub repo.</p>`:'<p class="mu">No trades yet.</p>'}
+let O,OS="all",OR=[];const rp=x=>"₹"+Math.round(x).toLocaleString("en-IN");
+async function opv(){
+  const el=$("op");
+  if(!O){try{O=await(await fetch("options.json?"+Date.now())).json()}catch(e){O={ok:false,msg:"options.json not found yet. Run the Daily scan once."}}}
+  if(!O.ok){el.innerHTML=`<p class="mu">${esc(O.msg||"No options data.")}</p>`;return}
+  const R=OR=O.ideas.filter(i=>OS=="all"||i.side==OS);
+  el.innerHTML=`<div id="ox">${Object.entries(O.index).map(([k,x])=>`<div class="ic"><b>${k}</b> ${f2(x.spot)} <span class="${x.chg>=0?"ok":"no"}">${x.chg>=0?"+":""}${x.chg}%</span><small>${x.a50?"Above":"Below"} 50 DMA, ${x.a200?"above":"below"} 200 DMA${O.vix?` · VIX ${O.vix}`:""}<br>PCR ${x.pcr} · Max pain ${f2(x.pain)} · Support ${f2(x.pw)} · Resistance ${f2(x.cw)}<br>Expiry ${x.expiry} · ATM IV ${x.iv??"–"}% · IV percentile ${x.ivp==null?"building":x.ivp+"%"}</small></div>`).join("")}</div>
+  <div class="ctl"><select id="os" aria-label="Calls or puts"><option value="all">Calls and puts</option><option value="bull">Calls (bullish)</option><option value="bear">Puts (bearish)</option></select></div>
+  <p class="mu">${R.length} ideas from ${O.date} data, ranked by score. Prices are end-of-day closes, so tomorrow’s premiums will differ. Money values are per lot.</p>
+  <div class="wrap"><table><thead><tr><th>#</th><th>Stock</th><th>Score</th><th>Best strategy</th><th>Expiry</th><th class="n">Net</th><th class="n">Max loss</th><th class="n">At Target 1</th><th class="n">R:R</th></tr></thead><tbody>${R.map((i,n)=>{const b=i.structs[i.best],cls=i.score>=8?"s":i.score>=6.5?"g":"";
+  return `<tr class="m" data-n="${n}"><td class="mu">${n+1}</td><td><b>${esc(i.sym)}</b><small>${i.side=="bull"?"Bullish":"Bearish"} · ${f2(i.spot)}</small></td><td><span class="sc ${cls}">${i.score.toFixed(1)}</span><small>${i.label}</small></td><td>${esc(b.name)}<small>${esc(b.legs.join(" / "))}</small></td><td>${i.expiry}<small>${i.dte} days</small></td><td class="n">${b.debit>=0?"Pay ":"Get "}${rp(Math.abs(b.debit))}</td><td class="n">${rp(b.risk)}</td><td class="n ok">${rp(b.pt)}</td><td class="n">${b.rr.toFixed(1)}</td></tr>
+  <tr class="d" hidden><td colspan="9"><div class="dt"><div><h4>Why this idea</h4><ul>${i.why.map(w=>`<li class="${w[0]}">${esc(w[1])}</li>`).join("")}</ul></div>
+  <div><h4>Score breakdown (out of 10)</h4>${Object.entries(i.parts).map(([k,v])=>`<div class="bar"><span>${k}</span><i style="--w:${v*10}%"></i><b>${v.toFixed(1)}</b></div>`).join("")}<p class="mu" style="margin:10px 0;font-size:13px">Underlying plan: entry ${f2(i.entry)}, stop ${f2(i.stop)}, Target 1 ${f2(i.t1)}, Target 2 ${f2(i.t2)} · lot ${i.lot}</p></div></div>
+  <div class="wrap" style="margin-top:12px"><table style="min-width:640px"><thead><tr><th>Strategy</th><th>Legs</th><th class="n">Net</th><th class="n">Max loss</th><th class="n">Max profit</th><th class="n">At Target 1</th><th class="n">At stop</th><th class="n">R:R</th><th class="n">Breakeven</th></tr></thead><tbody>${i.structs.map((s,k)=>`<tr><td>${k==i.best?"★ ":""}${esc(s.name)}</td><td>${esc(s.legs.join(" / "))}</td><td class="n">${s.debit>=0?"Pay ":"Get "}${rp(Math.abs(s.debit))}</td><td class="n">${rp(s.risk)}</td><td class="n">${s.maxp==null?"Unlimited":rp(s.maxp)}</td><td class="n ok">${rp(s.pt)}</td><td class="n no">${rp(s.ps)}</td><td class="n">${s.rr}</td><td class="n">${f2(s.be)}</td></tr>`).join("")}</tbody></table></div>
+  <p style="margin:10px 0 0"><button class="jb" data-n="${n}">Add to journal</button></p></td></tr>`}).join("")}</tbody></table></div>`;
+  $("os").value=OS}
 function csv(){const R=rows(),h=["Rank","Symbol","Name","Score","Patterns","Entry","Stop","Target1","Target2","RR"];
   const l=[h].concat(R.map((r,i)=>[i+1,r.sym,r.name,r.score,r.pats.join("; "),r.entry,r.stop,r.t1,r.t2??"",r.rr]));
   const b=new Blob([l.map(x=>x.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n")],{type:"text/csv"});
